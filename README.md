@@ -84,4 +84,3 @@ This repo is pre-product; issues and feature ideas are welcome. Open a GitHub is
 
 Protein Value Scanner is the quickest way to benchmark protein per dollar as you browse the grocery aisle. Give it a spin, save a few favorite items, and let us know what would make it indispensable for your meal prep workflow.*** End Patch
 
-Another cleanup
