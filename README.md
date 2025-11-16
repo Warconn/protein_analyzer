@@ -1,23 +1,21 @@
 # Protein Value Scanner
 
-Protein Value Scanner is a mobile-first React + TypeScript app for comparing protein-rich grocery items by cost effectiveness. Snap a nutrition label, run a mock OCR pass, fill in any missing info, and store the scan locally so you can see how your favorite items stack up.
-
-This repo is currently front-end only (Vite + React). All persistence relies on the browser’s `localStorage`, and OCR is simulated via rotating, realistic fixtures. The goal is to offer a fast way to estimate “protein per dollar” without typing every detail manually.
+Protein Value Scanner is a mobile-first React + TypeScript app for comparing protein-rich grocery items by cost effectiveness. Snap a nutrition label, send it through a self-hosted Tesseract OCR service, fill in any missing info, and store the scan locally so you can see how your favorite items stack up.
 
 ## Key Features
 
-- **Guided Scan Flow** – Upload a nutrition label photo, trigger the mock OCR step, and review/edit parsed fields before saving.
-- **Derived Metrics** – Automatically calculates total protein, protein per meal, cost per meal, and cost per gram of protein.
-- **Value Score** – Normalizes cost-per-gram across your saved scans to create a simple 0–100 comparison score.
-- **History & Comparison** – Sort scans by value, cost, or protein punch, and compare two or more items with highlighted best values.
-- **Offline-Friendly** – All data lives in localStorage; no backend setup needed for v1.
+- **Guided Scan Flow** – Upload a nutrition label photo, trigger the OCR step, and review/edit parsed fields (including units per package for multi-packs) before saving.
+- **Derived Metrics** – Calculates total protein, protein per meal, cost per meal, and cost per gram of protein as you type.
+- **Value Score** – Normalizes cost-per-gram across saved scans to create a simple 0–100 comparison score.
+- **History & Comparison** – Sort scans by value, cost, or protein punch, and compare multiple items with highlighted best values.
+- **Self-Hosted OCR** – Server-side Express + `tesseract.js` endpoint keeps data local (with an optional mock mode for offline dev).
 
 ## Tech Stack
 
-- [React](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/)
-- [Vite](https://vite.dev/) for dev/build tooling
-- Local state with React hooks; persistence via `localStorage`
-- Mock OCR generator (`mockOcrFromImage`) returns rotating realistic payloads so you can test the flow without any third-party service.
+- [React](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/) + [Vite](https://vite.dev/)
+- Styling via inline styles for now (mobile-first layout)
+- Browser persistence via `localStorage`
+- OCR micro-service: [Express](https://expressjs.com/) + [multer](https://github.com/expressjs/multer) + [tesseract.js](https://github.com/naptha/tesseract.js)
 
 ## Getting Started
 
@@ -25,14 +23,25 @@ This repo is currently front-end only (Vite + React). All persistence relies on 
 # Install dependencies
 npm install
 
-# Start the dev server
+# Start the Vite dev server
 npm run dev
+
+# Start the OCR service in another terminal
+npm run server
 
 # (optional) Type-check and build
 npm run build
 ```
 
-Open the dev server URL in your browser (Vite logs it, typically `http://localhost:5173`). The UI is designed for mobile widths first, so try shrinking the viewport or testing on your phone.
+The Vite dev server (default `http://localhost:5173`) proxies `/api/*` calls to the OCR service running on port `4000`. Keep both processes running during development. If you prefer to keep using fake OCR data, set `VITE_USE_MOCK_OCR=true` in a `.env` file and restart Vite.
+
+## OCR Service
+
+- Endpoint: `POST /api/ocr`
+- Payload: multipart form data with a single `image` field
+- Response: `{ text: string, parsed: OcrParsedNutrition }`
+
+`server/index.ts` pipes the uploaded file into Tesseract, then runs lightweight regex heuristics to populate an `OcrParsedNutrition` object (servings, protein, calories, etc.). The client still shows all fields for manual edits because OCR quality varies by lighting and label layout.
 
 ## Data Model
 
@@ -41,6 +50,7 @@ type ScannedItem = {
   id: string;
   name: string;
   servingsTotal: number;
+  unitsPerPackage: number;
   proteinPerServingGrams: number;
   typicalServingsPerMeal: number;
   packagePrice: number;
@@ -56,9 +66,11 @@ type ScannedItem = {
 
 The app persists an array of `ScannedItem` objects in `localStorage` under the key `proteinValueScannerItems`. Each time items are saved, the value score is recalculated based on the min/max cost-per-gram across the collection: lower cost → higher score. With a single item, the UI assigns a neutral score of 50 to keep comparisons meaningful as the list grows.
 
+`unitsPerPackage` captures how many individual containers (cups, pouches, etc.) you’re buying. Total servings in the package are computed as `servingsTotal * unitsPerPackage`, which drives total protein, cost per meal, and cost per gram for multipacks.
+
 ## Where We Want to Take This
 
-1. **Real OCR + AI Assist** – Integrate an actual OCR pipeline (Vision API, Tesseract, etc.) plus optional LLM cleanup to extract macros, ingredients, and marketing claims.
+1. **LLM Cleanup** – Feed raw OCR text into a self-hosted LLM to improve field extraction and catch confusing layouts.
 2. **Cloud Sync & Sharing** – Offer sign-in and secure cloud storage so scans sync across devices; generate shareable comparisons or grocery lists.
 3. **Richer Analytics** – Track historical price changes across stores, highlight “best buy” alerts, and let users slice data by grocery category or dietary goal.
 4. **Meal Planning Hooks** – Suggest recipes or meal prep ideas based on the protein sources you log most often.

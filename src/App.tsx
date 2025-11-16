@@ -16,6 +16,7 @@ export type ScannedItem = {
   category?: Category;
   store?: string;
   servingsTotal: number;
+  unitsPerPackage: number;
   servingSizeText?: string;
   proteinPerServingGrams: number;
   caloriesPerServing?: number;
@@ -82,11 +83,46 @@ const SAMPLE_CASES: OcrParsedNutrition[] = [
   },
 ];
 
-export async function mockOcrFromImage(_: File): Promise<OcrParsedNutrition> {
+const USE_MOCK_OCR = import.meta.env.VITE_USE_MOCK_OCR === "true";
+const OCR_ENDPOINT = "/api/ocr";
+
+async function extractNutritionFromImage(
+  file: File
+): Promise<OcrParsedNutrition> {
+  if (USE_MOCK_OCR) {
+    return getMockOcrResult();
+  }
+
+  const formData = new FormData();
+  formData.append("image", file);
+
+  const response = await fetch(OCR_ENDPOINT, {
+    method: "POST",
+    body: formData,
+  });
+
+  let payload: { parsed?: OcrParsedNutrition; error?: string } | undefined;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = undefined;
+  }
+
+  if (!response.ok) {
+    throw new Error(payload?.error ?? "Unable to reach OCR service.");
+  }
+
+  return payload?.parsed ?? {};
+}
+
+function getMockOcrResult(): Promise<OcrParsedNutrition> {
   const delay = 600 + Math.random() * 800;
-  await new Promise((resolve) => setTimeout(resolve, delay));
-  const index = Math.floor(Math.random() * SAMPLE_CASES.length);
-  return { ...SAMPLE_CASES[index] };
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      const index = Math.floor(Math.random() * SAMPLE_CASES.length);
+      resolve({ ...SAMPLE_CASES[index] });
+    }, delay);
+  });
 }
 
 const loadItems = (): ScannedItem[] => {
@@ -102,7 +138,14 @@ const loadItems = (): ScannedItem[] => {
     if (!Array.isArray(parsed)) {
       return [];
     }
-    return parsed as ScannedItem[];
+    return (parsed as Partial<ScannedItem>[]).map((item) => {
+      const units =
+        typeof item?.unitsPerPackage === "number" &&
+        Number.isFinite(item.unitsPerPackage)
+          ? item.unitsPerPackage
+          : 1;
+      return { ...item, unitsPerPackage: units } as ScannedItem;
+    });
   } catch {
     return [];
   }
@@ -121,6 +164,7 @@ type FormValues = {
   store: string;
   category: Category | "";
   servingsTotal: string;
+  unitsPerPackage: string;
   servingSizeText: string;
   proteinPerServingGrams: string;
   caloriesPerServing: string;
@@ -137,6 +181,7 @@ const initialFormValues: FormValues = {
   store: "",
   category: "",
   servingsTotal: "",
+  unitsPerPackage: "1",
   servingSizeText: "",
   proteinPerServingGrams: "",
   caloriesPerServing: "",
@@ -268,22 +313,31 @@ function App() {
 
   const derivedStats = useMemo(() => {
     const servingsTotal = parseNumber(formValues.servingsTotal);
+    const unitsPerPackage =
+      parseNumber(formValues.unitsPerPackage) ?? (servingsTotal ? 1 : undefined);
     const proteinPerServing = parseNumber(formValues.proteinPerServingGrams);
     const typicalServings = parseNumber(formValues.typicalServingsPerMeal);
     const packagePrice = parseNumber(formValues.packagePrice);
+
+    const totalServingsInPackage =
+      servingsTotal !== undefined && unitsPerPackage !== undefined
+        ? servingsTotal * unitsPerPackage
+        : undefined;
+
     const totalProtein =
-      servingsTotal !== undefined && proteinPerServing !== undefined
-        ? servingsTotal * proteinPerServing
+      totalServingsInPackage !== undefined &&
+      proteinPerServing !== undefined
+        ? totalServingsInPackage * proteinPerServing
         : undefined;
     const proteinPerMeal =
       typicalServings !== undefined && proteinPerServing !== undefined
         ? typicalServings * proteinPerServing
         : undefined;
     const numberOfMeals =
-      servingsTotal !== undefined &&
+      totalServingsInPackage !== undefined &&
       typicalServings !== undefined &&
       typicalServings > 0
-        ? servingsTotal / typicalServings
+        ? totalServingsInPackage / typicalServings
         : undefined;
     const costPerMeal =
       packagePrice !== undefined &&
@@ -298,6 +352,7 @@ function App() {
         ? packagePrice / totalProtein
         : undefined;
     return {
+      totalServingsInPackage,
       totalProtein,
       proteinPerMeal,
       numberOfMeals,
@@ -306,6 +361,7 @@ function App() {
     };
   }, [
     formValues.servingsTotal,
+    formValues.unitsPerPackage,
     formValues.proteinPerServingGrams,
     formValues.typicalServingsPerMeal,
     formValues.packagePrice,
@@ -356,7 +412,7 @@ function App() {
     setIsExtracting(true);
     setOcrError(null);
     try {
-      const parsed = await mockOcrFromImage(selectedFile);
+      const parsed = await extractNutritionFromImage(selectedFile);
       setFormValues((current) => ({
         ...current,
         name: parsed.name ?? current.name,
@@ -391,7 +447,15 @@ function App() {
       setFormVisible(true);
     } catch (error) {
       console.error(error);
-      setOcrError("Unable to read that image. Please try again.");
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to read that image. Please try again.";
+      setOcrError(
+        USE_MOCK_OCR
+          ? message
+          : `${message} Please ensure the OCR server is running.`
+      );
     } finally {
       setIsExtracting(false);
     }
@@ -418,6 +482,7 @@ function App() {
     const validation: Record<string, string> = {};
     const requiredFields: Array<{ key: keyof FormValues; label: string }> = [
       { key: "servingsTotal", label: "Servings per container" },
+      { key: "unitsPerPackage", label: "Units per package" },
       { key: "proteinPerServingGrams", label: "Protein per serving" },
       { key: "typicalServingsPerMeal", label: "Servings per meal" },
       { key: "packagePrice", label: "Package price" },
@@ -441,13 +506,17 @@ function App() {
       return;
     }
     const servingsTotal = Number(formValues.servingsTotal);
+    const unitsPerPackage = Number(formValues.unitsPerPackage);
     const proteinPerServing = Number(formValues.proteinPerServingGrams);
     const typicalServings = Number(formValues.typicalServingsPerMeal);
     const packagePrice = Number(formValues.packagePrice);
-    const totalProtein = servingsTotal * proteinPerServing;
+    const totalServingsInPackage = servingsTotal * unitsPerPackage;
+    const totalProtein = totalServingsInPackage * proteinPerServing;
     const proteinPerMeal = typicalServings * proteinPerServing;
     const mealsInPackage =
-      typicalServings > 0 ? servingsTotal / typicalServings : servingsTotal;
+      typicalServings > 0
+        ? totalServingsInPackage / typicalServings
+        : totalServingsInPackage;
     const costPerMeal =
       mealsInPackage > 0 ? packagePrice / mealsInPackage : packagePrice;
     const costPerGram =
@@ -459,6 +528,7 @@ function App() {
       category: formValues.category || undefined,
       store: formValues.store || undefined,
       servingsTotal,
+      unitsPerPackage,
       servingSizeText: formValues.servingSizeText || undefined,
       proteinPerServingGrams: proteinPerServing,
       caloriesPerServing: parseNumber(formValues.caloriesPerServing),
@@ -624,6 +694,14 @@ function App() {
                 min="0"
               />
               {renderError("servingsTotal")}
+              <NumberInput
+                label="Units per package (cups, tubs, etc.)"
+                name="unitsPerPackage"
+                value={formValues.unitsPerPackage}
+                onChange={handleInputChange}
+                min="1"
+              />
+              {renderError("unitsPerPackage")}
               <TextInput
                 label="Serving size"
                 name="servingSizeText"
@@ -697,6 +775,17 @@ function App() {
               }}
             >
               <strong>Live stats</strong>
+              <p>
+                Total servings in package:{" "}
+                {derivedStats.totalServingsInPackage &&
+                Number.isFinite(derivedStats.totalServingsInPackage)
+                  ? derivedStats.totalServingsInPackage %
+                      1 ===
+                    0
+                    ? derivedStats.totalServingsInPackage.toFixed(0)
+                    : derivedStats.totalServingsInPackage.toFixed(1)
+                  : "—"}
+              </p>
               <p>Protein per meal: {formatGrams(derivedStats.proteinPerMeal)}</p>
               <p>Cost per meal: {formatCurrency(derivedStats.costPerMeal)}</p>
               <p>
