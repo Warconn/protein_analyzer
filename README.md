@@ -2,7 +2,7 @@
 
 Protein Value Scanner is a mobile-first React + TypeScript app for comparing protein-rich grocery items by cost effectiveness. Snap a nutrition label, send it through a self-hosted Tesseract OCR service, fill in any missing info, and store the scan locally so you can see how your favorite items stack up.
 
-## Key Features
+Right now the app is front-end only (Vite + React + TypeScript) with everything stored locally in your browser.
 
 - **Guided Scan Flow** – Upload a nutrition label photo, trigger the OCR step, and review/edit parsed fields (including units per package for multi-packs) before saving.
 - **Derived Metrics** – Calculates total protein, protein per meal, cost per meal, and cost per gram of protein as you type.
@@ -10,7 +10,8 @@ Protein Value Scanner is a mobile-first React + TypeScript app for comparing pro
 - **History & Comparison** – Sort scans by value, cost, or protein punch, and compare multiple items with highlighted best values.
 - **Self-Hosted OCR** – Server-side Express + `tesseract.js` endpoint keeps data local (with an optional mock mode for offline dev).
 
-## Tech Stack
+- **Scan a label**  
+  Upload a photo and get a quick read of servings, macros, and protein.
 
 - [React](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/) + [Vite](https://vite.dev/)
 - Styling via inline styles for now (mobile-first layout)
@@ -20,7 +21,6 @@ Protein Value Scanner is a mobile-first React + TypeScript app for comparing pro
 ## Getting Started
 
 ```bash
-# Install dependencies
 npm install
 
 # Start the Vite dev server
