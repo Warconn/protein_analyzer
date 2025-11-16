@@ -7,7 +7,7 @@ Right now the app is front-end only (Vite + React + TypeScript) with everything 
 - **Guided Scan Flow** – Upload a nutrition label photo, trigger the OCR step, and review/edit parsed fields (including units per package for multi-packs) before saving.
 - **Derived Metrics** – Calculates total protein, protein per meal, cost per meal, and cost per gram of protein as you type.
 - **Value Score** – Normalizes cost-per-gram across saved scans to create a simple 0–100 comparison score.
-- **History & Comparison** – Sort scans by value, cost, or protein punch, and compare multiple items with highlighted best values.
+- **History & Analysis** – Dedicated tab ranks the best deals, lets you edit captured scans, sort in different ways, and run side-by-side comparisons.
 - **Self-Hosted OCR** – Server-side Express + `tesseract.js` endpoint keeps data local (with an optional mock mode for offline dev).
 
 - **Scan a label**  

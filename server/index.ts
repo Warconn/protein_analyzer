@@ -33,10 +33,16 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
   }
 
   try {
-    const { data } = await Tesseract.recognize(req.file.buffer, "eng", {
-      tessedit_char_whitelist:
-        "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%()/.:- ",
-    });
+    const { data } = await Tesseract.recognize(
+      req.file.buffer,
+      "eng",
+      {
+        // Not typed in tesseract.js but supported in the underlying worker.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        tessedit_char_whitelist:
+          "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%()/.:- ",
+      } as any
+    );
 
     const text = data.text ?? "";
     const parsed = parseNutritionText(text);

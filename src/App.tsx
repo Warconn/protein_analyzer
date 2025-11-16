@@ -1,6 +1,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ChangeEvent,
   type ChangeEventHandler,
@@ -281,6 +282,31 @@ const tableCellStyle: CSSProperties = {
   borderBottom: "1px solid #e2e8f0",
 };
 
+const itemToFormValues = (item: ScannedItem): FormValues => ({
+  name: item.name,
+  brand: item.brand ?? "",
+  store: item.store ?? "",
+  category: item.category ?? "",
+  servingsTotal: String(item.servingsTotal),
+  unitsPerPackage: String(item.unitsPerPackage ?? 1),
+  servingSizeText: item.servingSizeText ?? "",
+  proteinPerServingGrams: String(item.proteinPerServingGrams),
+  caloriesPerServing:
+    item.caloriesPerServing !== undefined ? String(item.caloriesPerServing) : "",
+  fatPerServingGrams:
+    item.fatPerServingGrams !== undefined ? String(item.fatPerServingGrams) : "",
+  carbsPerServingGrams:
+    item.carbsPerServingGrams !== undefined
+      ? String(item.carbsPerServingGrams)
+      : "",
+  sugarPerServingGrams:
+    item.sugarPerServingGrams !== undefined
+      ? String(item.sugarPerServingGrams)
+      : "",
+  typicalServingsPerMeal: String(item.typicalServingsPerMeal),
+  packagePrice: String(item.packagePrice),
+});
+
 function App() {
   const [items, setItems] = useState<ScannedItem[]>(() =>
     computeValueScores(loadItems())
@@ -296,6 +322,10 @@ function App() {
     "valueScore" | "costPerGram" | "proteinPerMeal"
   >("valueScore");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<"capture" | "history">("capture");
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     saveItems(items);
@@ -367,6 +397,14 @@ function App() {
     formValues.packagePrice,
   ]);
 
+  const missingRequiredFields = useMemo(
+    () =>
+      REQUIRED_FIELD_META.filter(({ key }) => formValues[key].trim() === "").map(
+        (field) => field.label
+      ),
+    [formValues]
+  );
+
   const sortedItems = useMemo(() => {
     const cloned = [...items];
     switch (sortMode) {
@@ -403,6 +441,8 @@ function App() {
     const file = event.target.files?.[0] ?? null;
     setSelectedFile(file);
     setOcrError(null);
+    setEditingItemId(null);
+    setSaveMessage(null);
   };
 
   const handleExtract = async () => {
@@ -411,6 +451,7 @@ function App() {
     }
     setIsExtracting(true);
     setOcrError(null);
+    setSaveMessage(null);
     try {
       const parsed = await extractNutritionFromImage(selectedFile);
       setFormValues((current) => ({
@@ -480,14 +521,7 @@ function App() {
 
   const validateForm = () => {
     const validation: Record<string, string> = {};
-    const requiredFields: Array<{ key: keyof FormValues; label: string }> = [
-      { key: "servingsTotal", label: "Servings per container" },
-      { key: "unitsPerPackage", label: "Units per package" },
-      { key: "proteinPerServingGrams", label: "Protein per serving" },
-      { key: "typicalServingsPerMeal", label: "Servings per meal" },
-      { key: "packagePrice", label: "Package price" },
-    ];
-    requiredFields.forEach(({ key, label }) => {
+    REQUIRED_FIELD_META.forEach(({ key, label }) => {
       const parsed = parseNumber(formValues[key]);
       if (parsed === undefined) {
         validation[key] = `${label} is required`;
@@ -521,8 +555,8 @@ function App() {
       mealsInPackage > 0 ? packagePrice / mealsInPackage : packagePrice;
     const costPerGram =
       totalProtein > 0 ? packagePrice / totalProtein : packagePrice;
-    const newItem: ScannedItem = {
-      id: generateId(),
+    const baseItem: ScannedItem = {
+      id: editingItemId ?? generateId(),
       name: formValues.name || "Untitled item",
       brand: formValues.brand || undefined,
       category: formValues.category || undefined,
@@ -542,10 +576,31 @@ function App() {
       costPerMeal,
       costPerGramProtein: costPerGram,
       valueScore: 0,
-      createdAt: new Date().toISOString(),
+      createdAt: editingItemId
+        ? items.find((item) => item.id === editingItemId)?.createdAt ??
+          new Date().toISOString()
+        : new Date().toISOString(),
     };
-    const updated = computeValueScores([...items, newItem]);
-    setItems(updated);
+
+    const costBefore =
+      items.length > 0
+        ? Math.min(...items.map((item) => item.costPerGramProtein))
+        : Infinity;
+
+    const updatedList = editingItemId
+      ? items.map((item) => (item.id === editingItemId ? baseItem : item))
+      : [...items, baseItem];
+
+    const rescored = computeValueScores(updatedList);
+    setItems(rescored);
+    setSaveMessage(
+      editingItemId
+        ? "Scan updated."
+        : !Number.isFinite(costBefore) || baseItem.costPerGramProtein <= costBefore
+        ? "👏 New most cost-effective item!"
+        : "Scan saved."
+    );
+    setEditingItemId(null);
     setFormValues(initialFormValues);
     setFormVisible(false);
     setSelectedFile(null);
@@ -560,12 +615,28 @@ function App() {
     setSelectedFile(null);
     setPreview(null);
     setSelectedIds([]);
+    setEditingItemId(null);
+    setSaveMessage(null);
   };
 
   const toggleSelected = (id: string) => {
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((itemId) => itemId !== id) : [...prev, id]
     );
+  };
+
+  const startEditing = (item: ScannedItem) => {
+    setActiveTab("capture");
+    setFormVisible(true);
+    setFormValues(itemToFormValues(item));
+    setEditingItemId(item.id);
+    setErrors({});
+    setSelectedFile(null);
+    setPreview(null);
+    setSaveMessage(null);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
   };
 
   const renderError = (key: keyof FormValues) =>
@@ -593,431 +664,587 @@ function App() {
             Upload labels, capture nutrition, and compare protein value by cost.
           </p>
         </header>
-
-        <section style={panelStyle}>
-          <h2 style={{ marginTop: 0, fontSize: "1.15rem" }}>1. New scan</h2>
-          <label
-            htmlFor="photoInput"
-            style={{
-              border: "2px dashed #94a3b8",
-              borderRadius: "12px",
-              padding: "20px",
-              display: "block",
-              textAlign: "center",
-              cursor: "pointer",
-              backgroundColor: "#f8fafc",
-            }}
-          >
-            <strong>Upload nutrition label photo</strong>
-            <p style={{ margin: "8px 0 0", color: "#64748b" }}>
-              Tap to pick an image from your device.
-            </p>
-            <input
-              id="photoInput"
-              type="file"
-              accept="image/*"
-              style={{ display: "none" }}
-              onChange={handleFileChange}
-            />
-          </label>
-          {preview && (
-            <div style={{ marginTop: "12px", textAlign: "center" }}>
-              <img
-                src={preview}
-                alt="Nutrition label preview"
-                style={{ maxWidth: "65%", borderRadius: "10px" }}
-              />
-            </div>
-          )}
-          <button
-            onClick={handleExtract}
-            disabled={!selectedFile || isExtracting}
-            style={{
-              marginTop: "16px",
-              width: "100%",
-              padding: "14px",
-              borderRadius: "10px",
-              border: "none",
-              backgroundColor: selectedFile ? "#0f766e" : "#94a3b8",
-              color: "#fff",
-              fontSize: "1rem",
-              fontWeight: 600,
-            }}
-          >
-            {isExtracting ? "Extracting..." : "Extract nutrition info"}
-          </button>
-          {ocrError && (
-            <p style={{ color: "#d93025", marginTop: "8px" }}>{ocrError}</p>
-          )}
-        </section>
-
-        {formVisible && (
-          <section style={panelStyle}>
-            <h2 style={{ marginTop: 0, fontSize: "1.15rem" }}>
-              2. Review and complete
-            </h2>
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              <TextInput
-                label="Item name"
-                name="name"
-                value={formValues.name}
-                onChange={handleInputChange}
-                placeholder="Greek yogurt"
-              />
-              <TextInput
-                label="Brand"
-                name="brand"
-                value={formValues.brand}
-                onChange={handleInputChange}
-                placeholder="Kirkland"
-              />
-              <TextInput
-                label="Store"
-                name="store"
-                value={formValues.store}
-                onChange={handleInputChange}
-                placeholder="Costco"
-              />
-              <SelectInput
-                label="Category"
-                name="category"
-                value={formValues.category}
-                onChange={handleInputChange}
-                options={categories}
-                placeholder="Select category"
-              />
-              <NumberInput
-                label="Servings per container"
-                name="servingsTotal"
-                value={formValues.servingsTotal}
-                onChange={handleInputChange}
-                min="0"
-              />
-              {renderError("servingsTotal")}
-              <NumberInput
-                label="Units per package (cups, tubs, etc.)"
-                name="unitsPerPackage"
-                value={formValues.unitsPerPackage}
-                onChange={handleInputChange}
-                min="1"
-              />
-              {renderError("unitsPerPackage")}
-              <TextInput
-                label="Serving size"
-                name="servingSizeText"
-                value={formValues.servingSizeText}
-                onChange={handleInputChange}
-                placeholder="3/4 cup (170g)"
-              />
-              <NumberInput
-                label="Protein per serving (g)"
-                name="proteinPerServingGrams"
-                value={formValues.proteinPerServingGrams}
-                onChange={handleInputChange}
-                min="0"
-              />
-              {renderError("proteinPerServingGrams")}
-              <NumberInput
-                label="Calories per serving"
-                name="caloriesPerServing"
-                value={formValues.caloriesPerServing}
-                onChange={handleInputChange}
-                min="0"
-              />
-              <NumberInput
-                label="Fat per serving (g)"
-                name="fatPerServingGrams"
-                value={formValues.fatPerServingGrams}
-                onChange={handleInputChange}
-                min="0"
-              />
-              <NumberInput
-                label="Carbs per serving (g)"
-                name="carbsPerServingGrams"
-                value={formValues.carbsPerServingGrams}
-                onChange={handleInputChange}
-                min="0"
-              />
-              <NumberInput
-                label="Sugar per serving (g)"
-                name="sugarPerServingGrams"
-                value={formValues.sugarPerServingGrams}
-                onChange={handleInputChange}
-                min="0"
-              />
-              <NumberInput
-                label="Typical servings you eat"
-                name="typicalServingsPerMeal"
-                value={formValues.typicalServingsPerMeal}
-                onChange={handleInputChange}
-                min="0"
-              />
-              {renderError("typicalServingsPerMeal")}
-              <NumberInput
-                label="Package price ($)"
-                name="packagePrice"
-                value={formValues.packagePrice}
-                onChange={handleInputChange}
-                min="0"
-                step="0.01"
-              />
-              {renderError("packagePrice")}
-            </div>
-
-            <div
+        <nav
+          style={{
+            display: "flex",
+            gap: "12px",
+            marginTop: "4px",
+          }}
+        >
+          {(["capture", "history"] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
               style={{
-                marginTop: "20px",
-                padding: "16px",
-                borderRadius: "12px",
-                backgroundColor: "#ecfeff",
-                lineHeight: 1.6,
-                color: "#065f46",
+                flex: 1,
+                padding: "12px",
+                borderRadius: "999px",
+                border: "none",
+                backgroundColor: activeTab === tab ? "#0f766e" : "#e2e8f0",
+                color: activeTab === tab ? "#fff" : "#475569",
+                fontWeight: 600,
+                cursor: "pointer",
               }}
             >
-              <strong>Live stats</strong>
-              <p>
-                Total servings in package:{" "}
-                {derivedStats.totalServingsInPackage &&
-                Number.isFinite(derivedStats.totalServingsInPackage)
-                  ? derivedStats.totalServingsInPackage %
-                      1 ===
-                    0
-                    ? derivedStats.totalServingsInPackage.toFixed(0)
-                    : derivedStats.totalServingsInPackage.toFixed(1)
-                  : "—"}
-              </p>
-              <p>Protein per meal: {formatGrams(derivedStats.proteinPerMeal)}</p>
-              <p>Cost per meal: {formatCurrency(derivedStats.costPerMeal)}</p>
-              <p>
-                Cost per gram of protein: {formatCurrency(derivedStats.costPerGram)}
-              </p>
-            </div>
+              {tab === "capture" ? "Capture new scan" : "History & analysis"}
+            </button>
+          ))}
+        </nav>
 
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "10px",
-                marginTop: "20px",
-              }}
-            >
-              <button
-                onClick={handleSave}
+        {activeTab === "capture" ? (
+          <>
+            {saveMessage && (
+              <div
                 style={{
+                  backgroundColor: "#dcfce7",
+                  color: "#166534",
+                  borderRadius: "12px",
+                  padding: "12px",
+                  fontWeight: 600,
+                }}
+              >
+                {saveMessage}
+              </div>
+            )}
+
+            <section style={panelStyle}>
+              <h2 style={{ marginTop: 0, fontSize: "1.15rem" }}>1. Capture</h2>
+              <p style={{ color: "#475569", marginTop: 0 }}>
+                Snap a clear photo of the nutrition panel or upload one from your
+                camera roll.
+              </p>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                style={{
+                  width: "100%",
+                  padding: "14px",
+                  borderRadius: "12px",
+                  border: "2px dashed #94a3b8",
+                  backgroundColor: "#f8fafc",
+                  color: "#0f172a",
+                  fontSize: "1rem",
+                  fontWeight: 600,
+                }}
+              >
+                {selectedFile ? "Retake / choose another photo" : "Capture / upload label photo"}
+              </button>
+              <input
+                ref={fileInputRef}
+                id="photoInput"
+                type="file"
+                accept="image/*"
+                capture="environment"
+                style={{ display: "none" }}
+                onChange={handleFileChange}
+              />
+              {preview && (
+                <div style={{ marginTop: "12px", textAlign: "center" }}>
+                  <img
+                    src={preview}
+                    alt="Nutrition label preview"
+                    style={{ maxWidth: "70%", borderRadius: "10px" }}
+                  />
+                </div>
+              )}
+              <button
+                onClick={handleExtract}
+                disabled={!selectedFile || isExtracting}
+                style={{
+                  marginTop: "16px",
+                  width: "100%",
                   padding: "14px",
                   borderRadius: "10px",
                   border: "none",
-                  backgroundColor: "#2563eb",
+                  backgroundColor: selectedFile ? "#0f766e" : "#94a3b8",
                   color: "#fff",
                   fontSize: "1rem",
                   fontWeight: 600,
                 }}
               >
-                Save scan
+                {isExtracting ? "Extracting..." : "Run OCR"}
               </button>
-              <button
-                onClick={handleReset}
-                style={{
-                  padding: "14px",
-                  borderRadius: "10px",
-                  border: "1px solid #cbd5f5",
-                  backgroundColor: "#fff",
-                  color: "#475569",
-                  fontSize: "1rem",
-                }}
-              >
-                Reset
-              </button>
-            </div>
-          </section>
-        )}
+              {ocrError && (
+                <p style={{ color: "#d93025", marginTop: "8px" }}>{ocrError}</p>
+              )}
+            </section>
 
-        <section style={panelStyle}>
-          <h2 style={{ marginTop: 0, fontSize: "1.15rem" }}>
-            3. History & comparison
-          </h2>
-          {items.length === 0 ? (
-            <p style={{ color: "#64748b" }}>No scans saved yet.</p>
-          ) : (
-            <>
-              <label
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "6px",
-                  fontSize: "0.95rem",
-                  color: "#475569",
-                  marginBottom: "12px",
-                }}
-              >
-                Sort by
-                <select
-                  value={sortMode}
-                  onChange={(event) =>
-                    setSortMode(event.target.value as typeof sortMode)
-                  }
-                  style={{
-                    padding: "10px",
-                    borderRadius: "8px",
-                    border: "1px solid #cbd5f5",
-                    fontSize: "1rem",
-                  }}
-                >
-                  <option value="valueScore">Best value score</option>
-                  <option value="costPerGram">Lowest cost per gram</option>
-                  <option value="proteinPerMeal">Highest protein per meal</option>
-                </select>
-              </label>
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                {sortedItems.map((item) => (
-                  <label
-                    key={item.id}
+            {formVisible && (
+              <section style={panelStyle}>
+                <h2 style={{ marginTop: 0, fontSize: "1.15rem" }}>
+                  2. Review & complete
+                </h2>
+                {editingItemId && (
+                  <div
                     style={{
-                      border: "1px solid #e2e8f0",
-                      borderRadius: "12px",
-                      padding: "12px",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "8px",
+                      backgroundColor: "#fef3c7",
+                      borderRadius: "10px",
+                      padding: "10px",
+                      color: "#92400e",
+                      fontWeight: 600,
+                      marginBottom: "12px",
                     }}
                   >
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        gap: "16px",
-                      }}
-                    >
-                      <div>
-                        <strong>
-                          {item.name}
-                          {item.brand ? ` • ${item.brand}` : ""}
-                        </strong>
-                        <div style={{ fontSize: "0.85rem", color: "#64748b" }}>
-                          {new Date(item.createdAt).toLocaleDateString()}
+                    Editing saved scan
+                  </div>
+                )}
+                {missingRequiredFields.length > 0 && (
+                  <div
+                    style={{
+                      backgroundColor: "#fee2e2",
+                      borderRadius: "10px",
+                      padding: "10px",
+                      color: "#991b1b",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    Need a quick check: please fill{" "}
+                    {missingRequiredFields.join(", ")}.
+                  </div>
+                )}
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  <h3 style={{ marginBottom: 0 }}>Product basics</h3>
+                  <TextInput
+                    label="Item name"
+                    name="name"
+                    value={formValues.name}
+                    onChange={handleInputChange}
+                    placeholder="Greek yogurt"
+                  />
+                  <TextInput
+                    label="Brand"
+                    name="brand"
+                    value={formValues.brand}
+                    onChange={handleInputChange}
+                    placeholder="Kirkland"
+                  />
+                  <TextInput
+                    label="Store"
+                    name="store"
+                    value={formValues.store}
+                    onChange={handleInputChange}
+                    placeholder="Costco"
+                  />
+                  <SelectInput
+                    label="Category"
+                    name="category"
+                    value={formValues.category}
+                    onChange={handleInputChange}
+                    options={categories}
+                    placeholder="Select category"
+                  />
+
+                  <h3 style={{ marginBottom: 0 }}>Label details</h3>
+                  <NumberInput
+                    label="Servings per container"
+                    name="servingsTotal"
+                    value={formValues.servingsTotal}
+                    onChange={handleInputChange}
+                    min="0"
+                  />
+                  {renderError("servingsTotal")}
+                  <NumberInput
+                    label="Units per package (cups, tubs, etc.)"
+                    name="unitsPerPackage"
+                    value={formValues.unitsPerPackage}
+                    onChange={handleInputChange}
+                    min="1"
+                  />
+                  {renderError("unitsPerPackage")}
+                  <TextInput
+                    label="Serving size"
+                    name="servingSizeText"
+                    value={formValues.servingSizeText}
+                    onChange={handleInputChange}
+                    placeholder="3/4 cup (170g)"
+                  />
+                  <NumberInput
+                    label="Protein per serving (g)"
+                    name="proteinPerServingGrams"
+                    value={formValues.proteinPerServingGrams}
+                    onChange={handleInputChange}
+                    min="0"
+                  />
+                  {renderError("proteinPerServingGrams")}
+                  <NumberInput
+                    label="Calories per serving"
+                    name="caloriesPerServing"
+                    value={formValues.caloriesPerServing}
+                    onChange={handleInputChange}
+                    min="0"
+                  />
+                  <NumberInput
+                    label="Fat per serving (g)"
+                    name="fatPerServingGrams"
+                    value={formValues.fatPerServingGrams}
+                    onChange={handleInputChange}
+                    min="0"
+                  />
+                  <NumberInput
+                    label="Carbs per serving (g)"
+                    name="carbsPerServingGrams"
+                    value={formValues.carbsPerServingGrams}
+                    onChange={handleInputChange}
+                    min="0"
+                  />
+                  <NumberInput
+                    label="Sugar per serving (g)"
+                    name="sugarPerServingGrams"
+                    value={formValues.sugarPerServingGrams}
+                    onChange={handleInputChange}
+                    min="0"
+                  />
+
+                  <h3 style={{ marginBottom: 0 }}>How you eat it</h3>
+                  <NumberInput
+                    label="Typical servings you eat"
+                    name="typicalServingsPerMeal"
+                    value={formValues.typicalServingsPerMeal}
+                    onChange={handleInputChange}
+                    min="0"
+                  />
+                  {renderError("typicalServingsPerMeal")}
+                  <NumberInput
+                    label="Package price ($)"
+                    name="packagePrice"
+                    value={formValues.packagePrice}
+                    onChange={handleInputChange}
+                    min="0"
+                    step="0.01"
+                  />
+                  {renderError("packagePrice")}
+                </div>
+
+                <div
+                  style={{
+                    marginTop: "20px",
+                    padding: "16px",
+                    borderRadius: "12px",
+                    backgroundColor: "#ecfeff",
+                    lineHeight: 1.6,
+                    color: "#065f46",
+                  }}
+                >
+                  <strong>Live stats</strong>
+                  <p>
+                    Total servings in package:{" "}
+                    {derivedStats.totalServingsInPackage &&
+                    Number.isFinite(derivedStats.totalServingsInPackage)
+                      ? derivedStats.totalServingsInPackage %
+                          1 ===
+                        0
+                        ? derivedStats.totalServingsInPackage.toFixed(0)
+                        : derivedStats.totalServingsInPackage.toFixed(1)
+                      : "—"}
+                  </p>
+                  <p>Protein per meal: {formatGrams(derivedStats.proteinPerMeal)}</p>
+                  <p>Cost per meal: {formatCurrency(derivedStats.costPerMeal)}</p>
+                  <p>
+                    Cost per gram of protein: {formatCurrency(derivedStats.costPerGram)}
+                  </p>
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "10px",
+                    marginTop: "20px",
+                  }}
+                >
+                  <button
+                    onClick={handleSave}
+                    style={{
+                      padding: "14px",
+                      borderRadius: "10px",
+                      border: "none",
+                      backgroundColor: "#2563eb",
+                      color: "#fff",
+                      fontSize: "1rem",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {editingItemId ? "Update scan" : "Save scan"}
+                  </button>
+                  <button
+                    onClick={handleReset}
+                    style={{
+                      padding: "14px",
+                      borderRadius: "10px",
+                      border: "1px solid #cbd5f5",
+                      backgroundColor: "#fff",
+                      color: "#475569",
+                      fontSize: "1rem",
+                    }}
+                  >
+                    Reset
+                  </button>
+                </div>
+              </section>
+            )}
+          </>
+        ) : (
+          <>
+            <section style={panelStyle}>
+              <h2 style={{ marginTop: 0, fontSize: "1.15rem" }}>Value leaderboard</h2>
+              {items.length === 0 ? (
+                <p style={{ color: "#64748b" }}>
+                  No scans yet. Capture a label to start comparing.
+                </p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  {[...items]
+                    .sort((a, b) => a.costPerGramProtein - b.costPerGramProtein)
+                    .slice(0, 4)
+                    .map((item, index) => (
+                      <div
+                        key={item.id}
+                        style={{
+                          border: "1px solid #e2e8f0",
+                          borderRadius: "12px",
+                          padding: "12px",
+                          backgroundColor: index === 0 ? "#ecfdf5" : "#fff",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            marginBottom: "8px",
+                          }}
+                        >
+                          <div>
+                            <strong>
+                              #{index + 1} {item.name}
+                            </strong>
+                            {item.brand ? (
+                              <span style={{ color: "#64748b" }}> • {item.brand}</span>
+                            ) : null}
+                          </div>
+                          <span style={{ fontWeight: 600, color: "#0f766e" }}>
+                            {formatCurrency(item.costPerGramProtein)} / g
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                            gap: "8px",
+                            fontSize: "0.9rem",
+                          }}
+                        >
+                          <span>Protein / meal: {formatGrams(item.proteinPerMealGrams)}</span>
+                          <span>Cost / meal: {formatCurrency(item.costPerMeal)}</span>
+                          <span>Value score: {item.valueScore}</span>
                         </div>
                       </div>
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.includes(item.id)}
-                        onChange={() => toggleSelected(item.id)}
-                        style={{ width: "20px", height: "20px" }}
-                      />
-                    </div>
-                    <div
+                    ))}
+                </div>
+              )}
+            </section>
+
+            <section style={panelStyle}>
+              <h2 style={{ marginTop: 0, fontSize: "1.15rem" }}>History & comparison</h2>
+              {items.length === 0 ? (
+                <p style={{ color: "#64748b" }}>No scans saved yet.</p>
+              ) : (
+                <>
+                  <label
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
+                      fontSize: "0.95rem",
+                      color: "#475569",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    Sort by
+                    <select
+                      value={sortMode}
+                      onChange={(event) =>
+                        setSortMode(event.target.value as typeof sortMode)
+                      }
                       style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                        gap: "8px",
-                        fontSize: "0.95rem",
+                        padding: "10px",
+                        borderRadius: "8px",
+                        border: "1px solid #cbd5f5",
+                        fontSize: "1rem",
                       }}
                     >
-                      <span>
-                        Protein / meal:{" "}
-                        <strong>{formatGrams(item.proteinPerMealGrams)}</strong>
-                      </span>
-                      <span>
-                        Cost / meal: <strong>{formatCurrency(item.costPerMeal)}</strong>
-                      </span>
-                      <span>
-                        Cost / gram:{" "}
-                        <strong>{formatCurrency(item.costPerGramProtein)}</strong>
-                      </span>
-                      <span>
-                        Value score: <strong>{item.valueScore}</strong>
-                      </span>
-                    </div>
+                      <option value="valueScore">Best value score</option>
+                      <option value="costPerGram">Lowest cost per gram</option>
+                      <option value="proteinPerMeal">Highest protein per meal</option>
+                    </select>
                   </label>
-                ))}
-              </div>
-            </>
-          )}
-        </section>
-
-        {selectedItems.length >= 2 && bestComparisonValues && (
-          <section style={panelStyle}>
-            <h3 style={{ marginTop: 0, fontSize: "1.1rem" }}>
-              Comparison ({selectedItems.length} items)
-            </h3>
-            <div style={{ overflowX: "auto" }}>
-              <table
-                style={{
-                  width: "100%",
-                  borderCollapse: "collapse",
-                  fontSize: "0.95rem",
-                }}
-              >
-                <thead>
-                  <tr style={{ backgroundColor: "#f1f5f9" }}>
-                    <th style={tableHeaderStyle}>Name</th>
-                    <th style={tableHeaderStyle}>Protein / meal</th>
-                    <th style={tableHeaderStyle}>Cost / meal</th>
-                    <th style={tableHeaderStyle}>Cost / gram</th>
-                    <th style={tableHeaderStyle}>Value score</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedItems.map((item) => (
-                    <tr key={item.id}>
-                      <td style={tableCellStyle}>
-                        <div style={{ fontWeight: 600 }}>{item.name}</div>
-                        <div style={{ color: "#64748b", fontSize: "0.85rem" }}>
-                          {item.brand || "—"}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    {sortedItems.map((item) => (
+                      <div
+                        key={item.id}
+                        style={{
+                          border: "1px solid #e2e8f0",
+                          borderRadius: "12px",
+                          padding: "12px",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "8px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: "12px",
+                          }}
+                        >
+                          <div>
+                            <strong>
+                              {item.name}
+                              {item.brand ? ` • ${item.brand}` : ""}
+                            </strong>
+                            <div style={{ fontSize: "0.85rem", color: "#64748b" }}>
+                              {new Date(item.createdAt).toLocaleDateString()}
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                            <button
+                              onClick={() => startEditing(item)}
+                              style={{
+                                padding: "6px 12px",
+                                borderRadius: "8px",
+                                border: "1px solid #0f766e",
+                                backgroundColor: "#d1fae5",
+                                color: "#065f46",
+                                fontSize: "0.9rem",
+                                fontWeight: 600,
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.includes(item.id)}
+                              onChange={() => toggleSelected(item.id)}
+                              style={{ width: "20px", height: "20px" }}
+                            />
+                          </div>
                         </div>
-                      </td>
-                      <td
-                        style={{
-                          ...tableCellStyle,
-                          ...(Math.abs(
-                            item.proteinPerMealGrams - bestComparisonValues.protein
-                          ) <= 0.01
-                            ? highlightStyle
-                            : {}),
-                        }}
-                      >
-                        {formatGrams(item.proteinPerMealGrams)}
-                      </td>
-                      <td
-                        style={{
-                          ...tableCellStyle,
-                          ...(Math.abs(
-                            item.costPerMeal - bestComparisonValues.costMeal
-                          ) <= 0.01
-                            ? highlightStyle
-                            : {}),
-                        }}
-                      >
-                        {formatCurrency(item.costPerMeal)}
-                      </td>
-                      <td
-                        style={{
-                          ...tableCellStyle,
-                          ...(Math.abs(
-                            item.costPerGramProtein - bestComparisonValues.costGram
-                          ) <= 0.01
-                            ? highlightStyle
-                            : {}),
-                        }}
-                      >
-                        {formatCurrency(item.costPerGramProtein)}
-                      </td>
-                      <td
-                        style={{
-                          ...tableCellStyle,
-                          ...(item.valueScore === bestComparisonValues.score
-                            ? highlightStyle
-                            : {}),
-                        }}
-                      >
-                        {item.valueScore}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                            gap: "8px",
+                            fontSize: "0.95rem",
+                          }}
+                        >
+                          <span>
+                            Protein / meal:{" "}
+                            <strong>{formatGrams(item.proteinPerMealGrams)}</strong>
+                          </span>
+                          <span>
+                            Cost / meal: <strong>{formatCurrency(item.costPerMeal)}</strong>
+                          </span>
+                          <span>
+                            Cost / gram:{" "}
+                            <strong>{formatCurrency(item.costPerGramProtein)}</strong>
+                          </span>
+                          <span>
+                            Value score: <strong>{item.valueScore}</strong>
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </section>
+
+            {selectedItems.length >= 2 && bestComparisonValues && (
+              <section style={panelStyle}>
+                <h3 style={{ marginTop: 0, fontSize: "1.1rem" }}>
+                  Comparison ({selectedItems.length} items)
+                </h3>
+                <div style={{ overflowX: "auto" }}>
+                  <table
+                    style={{
+                      width: "100%",
+                      borderCollapse: "collapse",
+                      fontSize: "0.95rem",
+                    }}
+                  >
+                    <thead>
+                      <tr style={{ backgroundColor: "#f1f5f9" }}>
+                        <th style={tableHeaderStyle}>Name</th>
+                        <th style={tableHeaderStyle}>Protein / meal</th>
+                        <th style={tableHeaderStyle}>Cost / meal</th>
+                        <th style={tableHeaderStyle}>Cost / gram</th>
+                        <th style={tableHeaderStyle}>Value score</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedItems.map((item) => (
+                        <tr key={item.id}>
+                          <td style={tableCellStyle}>
+                            <div style={{ fontWeight: 600 }}>{item.name}</div>
+                            <div style={{ color: "#64748b", fontSize: "0.85rem" }}>
+                              {item.brand || "—"}
+                            </div>
+                          </td>
+                          <td
+                            style={{
+                              ...tableCellStyle,
+                              ...(Math.abs(
+                                item.proteinPerMealGrams - bestComparisonValues.protein
+                              ) <= 0.01
+                                ? highlightStyle
+                                : {}),
+                            }}
+                          >
+                            {formatGrams(item.proteinPerMealGrams)}
+                          </td>
+                          <td
+                            style={{
+                              ...tableCellStyle,
+                              ...(Math.abs(
+                                item.costPerMeal - bestComparisonValues.costMeal
+                              ) <= 0.01
+                                ? highlightStyle
+                                : {}),
+                            }}
+                          >
+                            {formatCurrency(item.costPerMeal)}
+                          </td>
+                          <td
+                            style={{
+                              ...tableCellStyle,
+                              ...(Math.abs(
+                                item.costPerGramProtein - bestComparisonValues.costGram
+                              ) <= 0.01
+                                ? highlightStyle
+                                : {}),
+                            }}
+                          >
+                            {formatCurrency(item.costPerGramProtein)}
+                          </td>
+                          <td
+                            style={{
+                              ...tableCellStyle,
+                              ...(item.valueScore === bestComparisonValues.score
+                                ? highlightStyle
+                                : {}),
+                            }}
+                          >
+                            {item.valueScore}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
+          </>
         )}
       </main>
     </div>
@@ -1122,5 +1349,13 @@ const inputStyle: CSSProperties = {
   border: "1px solid #cbd5f5",
   fontSize: "1rem",
 };
+
+const REQUIRED_FIELD_META: Array<{ key: keyof FormValues; label: string }> = [
+  { key: "servingsTotal", label: "Servings per container" },
+  { key: "unitsPerPackage", label: "Units per package" },
+  { key: "proteinPerServingGrams", label: "Protein per serving" },
+  { key: "typicalServingsPerMeal", label: "Servings per meal" },
+  { key: "packagePrice", label: "Package price" },
+];
 
 export default App;
