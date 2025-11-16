@@ -1,73 +1,73 @@
-# React + TypeScript + Vite
+# Protein Value Scanner
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Protein Value Scanner is a mobile-first React + TypeScript app for comparing protein-rich grocery items by cost effectiveness. Snap a nutrition label, run a mock OCR pass, fill in any missing info, and store the scan locally so you can see how your favorite items stack up.
 
-Currently, two official plugins are available:
+This repo is currently front-end only (Vite + React). All persistence relies on the browser’s `localStorage`, and OCR is simulated via rotating, realistic fixtures. The goal is to offer a fast way to estimate “protein per dollar” without typing every detail manually.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Key Features
 
-## React Compiler
+- **Guided Scan Flow** – Upload a nutrition label photo, trigger the mock OCR step, and review/edit parsed fields before saving.
+- **Derived Metrics** – Automatically calculates total protein, protein per meal, cost per meal, and cost per gram of protein.
+- **Value Score** – Normalizes cost-per-gram across your saved scans to create a simple 0–100 comparison score.
+- **History & Comparison** – Sort scans by value, cost, or protein punch, and compare two or more items with highlighted best values.
+- **Offline-Friendly** – All data lives in localStorage; no backend setup needed for v1.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Tech Stack
 
-## Expanding the ESLint configuration
+- [React](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/)
+- [Vite](https://vite.dev/) for dev/build tooling
+- Local state with React hooks; persistence via `localStorage`
+- Mock OCR generator (`mockOcrFromImage`) returns rotating realistic payloads so you can test the flow without any third-party service.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Getting Started
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+```bash
+# Install dependencies
+npm install
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+# Start the dev server
+npm run dev
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+# (optional) Type-check and build
+npm run build
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Open the dev server URL in your browser (Vite logs it, typically `http://localhost:5173`). The UI is designed for mobile widths first, so try shrinking the viewport or testing on your phone.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Data Model
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```ts
+type ScannedItem = {
+  id: string;
+  name: string;
+  servingsTotal: number;
+  proteinPerServingGrams: number;
+  typicalServingsPerMeal: number;
+  packagePrice: number;
+  totalProteinGrams: number;
+  proteinPerMealGrams: number;
+  costPerMeal: number;
+  costPerGramProtein: number;
+  valueScore: number;
+  createdAt: string;
+  // + optional metadata (brand, store, macros, etc.)
+};
 ```
+
+The app persists an array of `ScannedItem` objects in `localStorage` under the key `proteinValueScannerItems`. Each time items are saved, the value score is recalculated based on the min/max cost-per-gram across the collection: lower cost → higher score. With a single item, the UI assigns a neutral score of 50 to keep comparisons meaningful as the list grows.
+
+## Where We Want to Take This
+
+1. **Real OCR + AI Assist** – Integrate an actual OCR pipeline (Vision API, Tesseract, etc.) plus optional LLM cleanup to extract macros, ingredients, and marketing claims.
+2. **Cloud Sync & Sharing** – Offer sign-in and secure cloud storage so scans sync across devices; generate shareable comparisons or grocery lists.
+3. **Richer Analytics** – Track historical price changes across stores, highlight “best buy” alerts, and let users slice data by grocery category or dietary goal.
+4. **Meal Planning Hooks** – Suggest recipes or meal prep ideas based on the protein sources you log most often.
+5. **Accessibility & PWA** – Ship as a Progressive Web App with offline caching, Home Screen install banners, and better keyboard/screen-reader coverage.
+
+## Contributing / Feedback
+
+This repo is pre-product; issues and feature ideas are welcome. Open a GitHub issue describing the enhancement you’d like to see or the bug you found. If you’d rather chat, drop a note with screenshots so we can keep iterating on the scanning + comparison experience.
+
+---
+
+Protein Value Scanner is the quickest way to benchmark protein per dollar as you browse the grocery aisle. Give it a spin, save a few favorite items, and let us know what would make it indispensable for your meal prep workflow.*** End Patch
